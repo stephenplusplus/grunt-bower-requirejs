@@ -7,9 +7,42 @@ module.exports = function (grunt) {
 	grunt.registerMultiTask('bower', 'Wire-up Bower components in RJS config', function () {
 		var cb = this.async();
 		var excludes = this.options({exclude: []}).exclude;
-		var configDir = path.dirname(this.data.rjsConfig);
-		var filePath = this.data.rjsConfig;
-		var file = grunt.file.read(filePath);
+
+		var htmlFilePath = this.data.html;
+		var htmlFile;
+		var configFilePath = this.data.rjsConfig;
+		var configFile;
+		var baseDir;
+
+		if (htmlFilePath) {
+			// Prefer an `html` property.
+			htmlFile = grunt.file.read(htmlFilePath);
+			findConfigFile();
+		}
+
+		if (!configFile && configFilePath) {
+			// Try the `rjsConfig` path.
+			configFile = grunt.file.read(configFilePath);
+			baseDir = path.dirname(configFilePath);
+		}
+
+		if (!configFile) {
+			// Nothing? How rude.
+			return cb();
+		}
+
+		// find config file based on the script include's data-main property
+		function findConfigFile() {
+			var dataMainPath = htmlFile.match(/<script[^>]*data-main=[^\w]*([\w|\/]+)/);
+			if (!dataMainPath) {
+				return;
+			}
+			// Find the base directory.
+			baseDir = path.dirname(htmlFilePath);
+			configFilePath = configFilePath || path.join(path.dirname(htmlFilePath), dataMainPath[1] + '.js');
+			configFile = grunt.file.read(configFilePath);
+		}
+
 
 		// remove extensions from js files but ignore folders
 		function stripJS(val) {
@@ -24,12 +57,12 @@ module.exports = function (grunt) {
 		}
 
 		// find script relative to config file
-		function configRelativeFileSearch(baseUrl, file) {
+		function baseDirRelativeFileSearch(baseUrl, file) {
 			var jspath;
 			if (baseUrl) {
-				jspath = path.relative(path.join(configDir, baseUrl), file);
+				jspath = path.relative(path.join(baseDir, baseUrl), file);
 			} else {
-				jspath = path.relative(configDir, file);
+				jspath = path.relative(baseDir, file);
 			}
 			return jspath;
 		}
@@ -58,7 +91,7 @@ module.exports = function (grunt) {
 					});
 
 					requirejs.tools.useLib(function (require) {
-						rjsConfig = require('transform').modifyConfig(file, function (config) {
+						rjsConfig = require('transform').modifyConfig(configFile, function (config) {
 							_.forOwn(data, function(val, key, obj) {
 								// if main is not an array convert it to one so we can
 								// use the same process throughout
@@ -91,13 +124,13 @@ module.exports = function (grunt) {
 									// splitting the component into multiple paths
 									delete obj[key];
 									_.forEach(jsfiles, function (jsfile) {
-										var jspath = configRelativeFileSearch(config.baseUrl, jsfile);
+										var jspath = baseDirRelativeFileSearch(config.baseUrl, jsfile);
 										obj[path.basename(jspath).split('.')[0]] = jspath;
 									});
 								// if there was only one js file create a path
 								// using the key
 								} else {
-									obj[key] = configRelativeFileSearch(config.baseUrl, jsfiles[0]);
+									obj[key] = baseDirRelativeFileSearch(config.baseUrl, jsfiles[0]);
 								}
 							});
 
@@ -105,7 +138,7 @@ module.exports = function (grunt) {
 							return config;
 						});
 
-						grunt.file.write(filePath, rjsConfig);
+						grunt.file.write(configFilePath, rjsConfig);
 						grunt.log.writeln('Updated RequireJS config with installed Bower components'.green);
 						cb();
 					});
